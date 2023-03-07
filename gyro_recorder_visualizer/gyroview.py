@@ -1,6 +1,7 @@
 import cv2
-import pandas as pd
+import linalg
 import numpy as np
+import pandas as pd
 import sys
 import time
 
@@ -56,27 +57,12 @@ CUBE_MODEL = np.array([
     [1.0,-1.0, 1.0],
 ])
 
-IDENTITY_TRANSFORM = np.array([
-    [1.0, 0.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0, 0.0],
-    [0.0, 0.0, 1.0, 0.0],
-    [0.0, 0.0, 0.0, 1.0],
-])
+IDENTITY_TRANSFORM = linalg.IDENTITY
 
 CAMERA_NEAR = 0.01
 CAMERA_FAR = 20.0
 
-CAMERA_A = (CAMERA_FAR + CAMERA_NEAR)/(CAMERA_FAR - CAMERA_NEAR)
-CAMERA_B = (2*CAMERA_FAR*CAMERA_NEAR)/(CAMERA_FAR - CAMERA_NEAR)
-
-SCALE_W = VIEWPORT_SIZE[1]/VIEWPORT_SIZE[0]
-
-CAMERA = np.array([
-    [2*SCALE_W, 0.0, 0.0, 0.0],
-    [0.0, -1.0, 0.0, 0.0],
-    [0.0, 0.0, CAMERA_A, CAMERA_B],
-    [0.0, 0.0, -1.0, 0.0],
-])
+CAMERA = linalg.camera(VIEWPORT_SIZE, CAMERA_NEAR, CAMERA_FAR)
 
 AMBIENT_LIGTH_VECTOR = np.array([0.0, 0.0, -1.0]);
 
@@ -95,9 +81,7 @@ def main(input_filename, calibration_filename):
     pos_y = 0.0
     pos_z = -5.0
 
-    rot_x = 0.0
-    rot_y = 0.0
-    rot_z = 0.0
+    rot_matrix = IDENTITY_TRANSFORM
 
     # render_frame_counter = 0
     # render_frame_time = 200
@@ -110,20 +94,22 @@ def main(input_filename, calibration_filename):
         print(f'Timestamp elapsed ms: {ts}ms')
 
         (gx, gy, gz) = gyro_data[i]
-        (gx, gy, gz) = (gx - cal_gyro_x_mean, gy - cal_gyro_y_mean, gz - cal_gyro_z_mean)
+        # (gx, gy, gz) = (gx - cal_gyro_x_mean, gy - cal_gyro_y_mean, gz - cal_gyro_z_mean)
 
         # (ax, ay, az) = accel_data[i]
 
-        rot_x += (gx/600) * np.pi/2
-        rot_y += (gy/600) * np.pi/2
-        rot_z += (gz/600) * np.pi/2
+        angle_x = (gx/600) * np.pi/2
+        angle_y = (gy/600) * np.pi/2
+        angle_z = (gz/600) * np.pi/2
+
+        rot_matrix = np.matmul(rot_matrix, linalg.mrot_x(angle_x))
+        rot_matrix = np.matmul(rot_matrix, linalg.mrot_y(angle_y))
+        rot_matrix = np.matmul(rot_matrix, linalg.mrot_z(angle_z))
 
         box_matrix = IDENTITY_TRANSFORM
-        box_matrix = np.matmul(box_matrix, mtranslate(pos_x, pos_y, pos_z))
+        box_matrix = np.matmul(box_matrix, linalg.mtranslate(pos_x, pos_y, pos_z))
 
-        box_matrix = np.matmul(box_matrix, mrot_x(rot_x))
-        box_matrix = np.matmul(box_matrix, mrot_y(rot_y))
-        box_matrix = np.matmul(box_matrix, mrot_z(rot_z))
+        box_matrix = np.matmul(box_matrix, rot_matrix)
 
         img = render_convex_volume(CUBE_MODEL, CAMERA, box_matrix)
         cv2.imshow('Gyro View', img)
@@ -170,7 +156,7 @@ def render_convex_volume(vertices, mview, mtransform):
             vec_pre_ac = np.array(pre_a) - np.array(pre_c)
             vec_pre_out = np.cross(vec_pre_ab, vec_pre_ac)
 
-            brightness = abs(np.dot(AMBIENT_LIGTH_VECTOR, vnormalize(vec_pre_out)))
+            brightness = abs(np.dot(AMBIENT_LIGTH_VECTOR, linalg.vnormalize(vec_pre_out)))
 
             color = np.array([1.0, 0.0, 0.0]) * brightness
             color = (
@@ -187,45 +173,6 @@ def render_convex_volume(vertices, mview, mtransform):
                 sys.exit(1)
 
     return img
-
-def mtranslate(x, y, z):
-    return np.array([
-        [1.0, 0.0, 0.0, x],
-        [0.0, 1.0, 0.0, y],
-        [0.0, 0.0, 1.0, z],
-        [0.0, 0.0, 0.0, 1.0],
-    ])
-
-def mrot_x(angle):
-    return np.array([
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, np.cos(angle), -np.sin(angle), 0.0],
-        [0.0, np.sin(angle), np.cos(angle), 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ])
-
-def mrot_y(angle):
-    return np.array([
-        [np.cos(angle), 0.0, np.sin(angle), 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [-np.sin(angle), 0.0, np.cos(angle), 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ])
-
-def mrot_z(angle):
-    return np.array([
-        [np.cos(angle), -np.sin(angle), 0.0, 0.0],
-        [np.sin(angle), np.cos(angle), 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ])
-
-def vnormalize(vector):
-    length = np.sqrt((vector**2).sum())
-    if abs(length) > 0.0:
-        return vector/np.sqrt((vector**2).sum())
-    else:
-        return vector
 
 if __name__ == '__main__':
     main(sys.argv[1], sys.argv[2])
